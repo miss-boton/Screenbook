@@ -59,6 +59,13 @@ export async function initFirebase(config) {
         items = next; emit(); ready();
       }, (err) => { console.error(err); ready(); });
       await first;
+      // Listas compartidas en las que está esta persona.
+      let shared = [];
+      const sharedCol = fs.collection(db, "sharedLists");
+      fs.onSnapshot(fs.query(sharedCol, fs.where("members", "array-contains", user.email)), (qs) => {
+        shared = qs.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name));
+        emit();
+      }, (err) => console.warn("sharedLists", err.code));
       const id = (key) => key.replace("/", "_");
       return {
         mode: "firebase",
@@ -77,6 +84,15 @@ export async function initFirebase(config) {
             onProgress?.(Math.min(i + 400, list.length), list.length);
           }
         },
+        shared: () => shared,
+        async createShared({ name, members, items }) {
+          const ref = fs.doc(sharedCol);
+          await fs.setDoc(ref, { name, owner: user.email, members, items, createdAt: Date.now() });
+          return ref.id;
+        },
+        updateShared: (id, patch) => fs.updateDoc(fs.doc(sharedCol, id), patch),
+        deleteShared: (id) => fs.deleteDoc(fs.doc(sharedCol, id)),
+        setSharedItem: (id, key, brief) => fs.updateDoc(fs.doc(sharedCol, id), new fs.FieldPath("items", key), brief || fs.deleteField()),
         getSettings: () => settings,
         async saveSettings(s) {
           settings = s;

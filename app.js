@@ -98,22 +98,94 @@ function drawNews(main, n) {
     block("Películas nuevas en tus plataformas", n.newMovies, "Sin novedades ahora mismo.");
 }
 
-// ---------- Listas propias ----------
+// ---------- Listas propias y compartidas ----------
+// Lista personal: id "p:<nombre>" (etiqueta en cada título). Compartida: id "s:<docId>" (documento en Firestore).
 let currentList = null;
-const allLists = () => {
+const personalLists = () => {
   const names = new Set(settings.lists || []);
   Object.values(store.all()).forEach((i) => (i.lists || []).forEach((l) => names.add(l)));
   return [...names];
 };
+const sharedLists = () => (store.shared ? store.shared() : []);
+const listIds = () => [...personalLists().map((n) => `p:${n}`), ...sharedLists().map((s) => `s:${s.id}`)];
+const sharedById = (id) => sharedLists().find((s) => s.id === id);
+const listLabel = (lid) => lid.startsWith("p:") ? lid.slice(2) : `👥 ${sharedById(lid.slice(2))?.name || ""}`;
+function listItems(lid) {
+  if (lid.startsWith("p:")) { const n = lid.slice(2); return Object.values(store.all()).filter((i) => (i.lists || []).includes(n)); }
+  const s = sharedById(lid.slice(2));
+  return s ? Object.values(s.items || {}).map((x) => ({ ...x, ...(store.get(x.key) || {}) })) : [];
+}
+const inList = (lid, key) => lid.startsWith("p:") ? (store.get(key)?.lists || []).includes(lid.slice(2)) : !!sharedById(lid.slice(2))?.items?.[key];
+
 function renderLists(main) {
-  const lists = allLists();
-  if (!lists.length) { main.innerHTML = `<div class="empty"><p>Aún no tienes listas.</p><p>Abre la ficha de un título y pulsa "+ Nueva lista", o importa tus listas de TV Time en Ajustes.</p></div>`; return; }
-  if (!lists.includes(currentList)) currentList = lists[0];
-  const items = Object.values(store.all()).filter((i) => (i.lists || []).includes(currentList) && (typeFilter === "all" || i.type === typeFilter));
-  const count = (l) => Object.values(store.all()).filter((i) => (i.lists || []).includes(l)).length;
-  main.innerHTML = `<div class="listchips">${lists.map((l) => `<button data-list="${esc(l)}" class="${l === currentList ? "on" : ""}">${esc(l)} <span class="count">${count(l)}</span></button>`).join("")}</div>
+  const ids = listIds();
+  if (!ids.length) { main.innerHTML = `<div class="empty"><p>Aún no tienes listas.</p><p>Abre la ficha de un título y pulsa "+ Nueva lista", o importa tus listas de TV Time en Ajustes.</p></div>`; return; }
+  if (!ids.includes(currentList)) currentList = ids[0];
+  const items = listItems(currentList).filter((i) => typeFilter === "all" || i.type === typeFilter);
+  const sh = currentList.startsWith("s:") ? sharedById(currentList.slice(2)) : null;
+  const me = store.user?.email;
+  main.innerHTML = `<div class="listchips">${ids.map((l) => `<button data-list="${esc(l)}" class="${l === currentList ? "on" : ""}">${esc(listLabel(l))} <span class="count">${listItems(l).length}</span></button>`).join("")}</div>
+    <div class="listbar">
+      ${sh ? `<span class="sub">Compartida con ${esc(sh.members.filter((m) => m !== me).join(", ") || "nadie más")}</span>` : ""}
+      <button class="link" data-listact="rename">Renombrar</button>
+      ${store.mode === "firebase" ? `<button class="link" data-listact="share">${sh ? "Añadir persona" : "Compartir"}</button>` : ""}
+      <button class="link danger" data-listact="delete">${sh && sh.owner !== me ? "Salir de la lista" : "Eliminar lista"}</button>
+    </div>
     ${items.length ? `<div class="grid">${items.sort((a, b) => a.title.localeCompare(b.title)).map((i) => card(i)).join("")}</div>` : `<p class="hint">Esta lista está vacía.</p>`}`;
 }
+
+async function listAction(act) {
+  const lid = currentList;
+  if (!lid) return;
+  if (lid.startsWith("p:")) {
+    const name = lid.slice(2);
+    const tagged = Object.values(store.all()).filter((i) => (i.lists || []).includes(name));
+    if (act === "rename") {
+      const nn = (prompt("Nuevo nombre de la lista", name) || "").trim();
+      if (!nn || nn === name) return;
+      await store.putMany(tagged.map((i) => ({ ...i, lists: [...new Set(i.lists.map((x) => (x === name ? nn : x)))] })));
+      settings = { ...settings, lists: [...new Set((settings.lists || []).map((x) => (x === name ? nn : x)))] };
+      await store.saveSettings(settings);
+      currentList = `p:${nn}`;
+    } else if (act === "delete") {
+      if (!confirm(`¿Eliminar la lista "${name}"? Los títulos siguen en tus pestañas; solo se quita la lista.`)) return;
+      await store.putMany(tagged.map((i) => ({ ...i, lists: i.lists.filter((x) => x !== name) })));
+      settings = { ...settings, lists: (settings.lists || []).filter((x) => x !== name) };
+      await store.saveSettings(settings);
+      currentList = null;
+    } else if (act === "share") {
+      const emails = askEmails(`¿Con quién quieres compartir "${name}"? Escribe su email (si son varios, sepáralos con comas). Tiene que estar en tu lista de personas autorizadas.`);
+      if (!emails.length) return;
+      const items = Object.fromEntries(tagged.map((i) => [i.key, briefOf(i)]));
+      const id = await store.createShared({ name, members: [store.user.email, ...emails], items });
+      await store.putMany(tagged.map((i) => ({ ...i, lists: i.lists.filter((x) => x !== name) })));
+      settings = { ...settings, lists: (settings.lists || []).filter((x) => x !== name) };
+      await store.saveSettings(settings);
+      currentList = `s:${id}`;
+    }
+  } else {
+    const s = sharedById(lid.slice(2));
+    if (!s) return;
+    if (act === "rename") {
+      const nn = (prompt("Nuevo nombre de la lista", s.name) || "").trim();
+      if (nn && nn !== s.name) await store.updateShared(s.id, { name: nn });
+    } else if (act === "share") {
+      const emails = askEmails("Email de la persona que quieres añadir (tiene que estar en tu lista de personas autorizadas).");
+      if (emails.length) await store.updateShared(s.id, { members: [...new Set([...s.members, ...emails])] });
+    } else if (act === "delete") {
+      const owner = s.owner === store.user.email;
+      if (!confirm(owner ? `¿Eliminar "${s.name}" para todas las personas con las que la compartes?` : `¿Salir de "${s.name}"? Dejarás de verla.`)) return;
+      if (owner) await store.deleteShared(s.id);
+      else await store.updateShared(s.id, { members: s.members.filter((m) => m !== store.user.email) });
+      currentList = null;
+    }
+  }
+  renderList();
+}
+function askEmails(msg) {
+  return (prompt(msg) || "").split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) && e !== store.user?.email);
+}
+const briefOf = (i) => ({ key: i.key, id: i.id, type: i.type, title: i.title, poster: i.poster || "", year: i.year || "" });
 
 async function renderDiscover(main) {
   if (!tmdb.hasKey()) {
@@ -205,7 +277,7 @@ async function openDetail(type, id) {
       </section>
       <section>
         <h3>Mis listas</h3>
-        <div class="listchips small">${allLists().map((l) => `<button data-togglelist="${esc(l)}" class="${(it?.lists || []).includes(l) ? "on" : ""}">${esc(l)}</button>`).join("")}
+        <div class="listchips small">${listIds().map((l) => `<button data-togglelist="${esc(l)}" class="${inList(l, key) ? "on" : ""}">${esc(listLabel(l))}</button>`).join("")}
           <button data-newlist class="ghost">+ Nueva lista</button></div>
       </section>
       ${d.overview ? `<section><p class="overview">${esc(d.overview)}</p></section>` : ""}
@@ -275,8 +347,13 @@ async function openDetail(type, id) {
     if (t === dlg || t.closest("[data-close]")) return dlg.close();
     const tl = t.closest("[data-togglelist]")?.dataset.togglelist;
     const nl = t.closest("[data-newlist]");
+    if (tl && tl.startsWith("s:")) {
+      await store.setSharedItem(tl.slice(2), key, inList(tl, key) ? null : briefOf(base));
+      redrawKeepingOpen();
+      return;
+    }
     if (tl || nl) {
-      const name = tl || (prompt("Nombre de la nueva lista") || "").trim();
+      const name = tl ? tl.slice(2) : (prompt("Nombre de la nueva lista") || "").trim();
       if (!name) return;
       if (nl && !(settings.lists || []).includes(name)) {
         settings = { ...settings, lists: [...(settings.lists || []), name] };
@@ -419,6 +496,8 @@ document.addEventListener("click", (ev) => {
   }
   const lc = ev.target.closest("[data-list]");
   if (lc) { currentList = lc.dataset.list; renderList(); return; }
+  const la = ev.target.closest("[data-listact]");
+  if (la) { listAction(la.dataset.listact).catch((e) => alertBox(`No se pudo completar: ${e.message}`)); return; }
   const t = ev.target.closest("[data-tab]");
   if (t) { tab = t.dataset.tab; renderList(); }
   const f = ev.target.closest("[data-type]");

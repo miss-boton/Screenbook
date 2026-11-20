@@ -150,3 +150,11 @@ h1 { color: #D9A21B; }
 .listchips button.on { background: var(--pine); border-color: var(--mint); }
 .listchips.small { margin-bottom: 0; }
 .listchips.small button { font-size: 13px; padding: 4px 10px; }
+
+/* Pestañas: letras en blanco y números en amarillo */
+.tabs button { color: var(--white); }
+.tabs button .count { color: var(--sun); opacity: 1; }
+.tabs button.on, .tabs button.on .count { color: var(--on-accent); }
+.listchips .count { color: var(--sun); }
+.listbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: -6px 0 18px; font-size: 14px; }
+.link.danger { color: var(--text); text-decoration-color: var(--coral); }

@@ -12,6 +12,12 @@ service cloud.firestore {
     match /config/allowlist {
       allow read, write: if false;
     }
+    // Listas compartidas: solo las ven y cambian sus miembros.
+    match /sharedLists/{id} {
+      allow read, update, delete: if allowed() && request.auth.token.email in resource.data.members;
+      allow create: if allowed() && request.resource.data.owner == request.auth.token.email
+        && request.auth.token.email in request.resource.data.members;
+    }
     match /users/{uid} {
       allow read, write: if allowed() && request.auth.uid == uid;
       match /items/{item} {
