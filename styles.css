@@ -137,3 +137,16 @@ h1 { display: flex; align-items: center; gap: 10px; }
 .emailform { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; justify-content: center; }
 .emailform input { flex: 1 1 200px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
 .emailform button { padding: 10px 16px; }
+
+/* Pedidos de Paloma: nombre en el mostaza del logo y pestañas en amarillo */
+h1 { color: #D9A21B; }
+.tabs button { color: var(--sun); }
+.tabs button.on { color: var(--on-accent); }
+.note { color: var(--sun) !important; font-weight: 500; }
+.news { margin-bottom: 28px; padding: 0; }
+.news h3 { margin-bottom: 12px; }
+.listchips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.listchips button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--text); font-size: 14px; }
+.listchips button.on { background: var(--pine); border-color: var(--mint); }
+.listchips.small { margin-bottom: 0; }
+.listchips.small button { font-size: 13px; padding: 4px 10px; }

@@ -2,7 +2,8 @@ import * as tmdb from "./tmdb.js";
 import { createStore, exportBackup } from "./store.js";
 import { ALL_PLATFORMS, DEFAULT_PLATFORMS, FIREBASE } from "./config.js";
 import { initFirebase } from "./firebase-store.js";
-import { importTvTime } from "./import.js";
+import { importTvTime, importTvTimeLists } from "./import.js";
+import { buildNews } from "./news.js";
 
 let store = null;
 let settings = { platforms: DEFAULT_PLATFORMS };
@@ -34,7 +35,7 @@ function nextEpisode(item) {
   return null;
 }
 
-function card(item) {
+function card(item, note = "") {
   const p = progressOf(item);
   const pct = p && p.total ? Math.round((p.done / p.total) * 100) : 0;
   const next = item.status === "watching" ? nextEpisode(item) : null;
@@ -46,6 +47,7 @@ function card(item) {
       <div class="meta">
         <strong>${esc(item.title)}</strong>
         <small>${esc(item.year || "")}${next ? ` · Sigue: ${next}` : ""}</small>
+        ${note ? `<small class="note">${esc(note)}</small>` : ""}
         ${p && p.total ? `<div class="bar"><i style="width:${pct}%"></i></div><small>${p.done}/${p.total} episodios</small>` : ""}
       </div>
     </button>`;
@@ -65,9 +67,52 @@ function renderList() {
   });
   const main = $("#main");
   if (tab === "discover") return renderDiscover(main);
+  if (tab === "news") return renderNews(main);
+  if (tab === "lists") return renderLists(main);
   main.innerHTML = items.length
     ? `<div class="grid">${items.map(card).join("")}</div>`
     : `<div class="empty"><p>Aún no hay nada en <b>${STATUSES.find((s) => s.id === tab).label}</b>.</p><p>Busca una serie o película arriba para añadirla.</p></div>`;
+}
+
+// ---------- Novedades ----------
+let newsCache = null;
+async function renderNews(main) {
+  if (newsCache && Date.now() - newsCache.at < 10 * 60e3) return drawNews(main, newsCache.data);
+  main.innerHTML = `<p class="hint">Revisando tus series y tus plataformas…</p>`;
+  try {
+    const data = await buildNews(store.all());
+    newsCache = { at: Date.now(), data };
+    if (tab === "news") drawNews(main, data);
+  } catch (e) { main.innerHTML = `<div class="empty"><p>No se pudieron cargar las novedades (${esc(e.message)}).</p></div>`; }
+}
+function drawNews(main, n) {
+  const block = (title, list, empty) => `
+    <section class="news"><h3>${title}</h3>
+      ${list.length ? `<div class="grid">${list.map((x) => card(x.item, x.note)).join("")}</div>` : `<p class="hint">${empty}</p>`}
+    </section>`;
+  main.innerHTML =
+    block("Temporadas completas para ver", n.complete, "Ninguna de tus series ha terminado temporada en los últimos dos meses.") +
+    block("Episodios nuevos", n.fresh, "No hay episodios nuevos esta semana en tus series.") +
+    block("Próximos estrenos", n.upcoming, "Nada previsto en las próximas semanas.") +
+    block("Series nuevas en tus plataformas", n.newShows, "Sin novedades ahora mismo.") +
+    block("Películas nuevas en tus plataformas", n.newMovies, "Sin novedades ahora mismo.");
+}
+
+// ---------- Listas propias ----------
+let currentList = null;
+const allLists = () => {
+  const names = new Set(settings.lists || []);
+  Object.values(store.all()).forEach((i) => (i.lists || []).forEach((l) => names.add(l)));
+  return [...names];
+};
+function renderLists(main) {
+  const lists = allLists();
+  if (!lists.length) { main.innerHTML = `<div class="empty"><p>Aún no tienes listas.</p><p>Abre la ficha de un título y pulsa "+ Nueva lista", o importa tus listas de TV Time en Ajustes.</p></div>`; return; }
+  if (!lists.includes(currentList)) currentList = lists[0];
+  const items = Object.values(store.all()).filter((i) => (i.lists || []).includes(currentList) && (typeFilter === "all" || i.type === typeFilter));
+  const count = (l) => Object.values(store.all()).filter((i) => (i.lists || []).includes(l)).length;
+  main.innerHTML = `<div class="listchips">${lists.map((l) => `<button data-list="${esc(l)}" class="${l === currentList ? "on" : ""}">${esc(l)} <span class="count">${count(l)}</span></button>`).join("")}</div>
+    ${items.length ? `<div class="grid">${items.sort((a, b) => a.title.localeCompare(b.title)).map((i) => card(i)).join("")}</div>` : `<p class="hint">Esta lista está vacía.</p>`}`;
 }
 
 async function renderDiscover(main) {
@@ -158,6 +203,11 @@ async function openDetail(type, id) {
         ${STATUSES.map((s) => `<button data-status="${s.id}" class="${it?.status === s.id ? "on" : ""}">${s.label}</button>`).join("")}
         ${it ? `<button data-status="remove" class="ghost">Quitar</button>` : ""}
       </section>
+      <section>
+        <h3>Mis listas</h3>
+        <div class="listchips small">${allLists().map((l) => `<button data-togglelist="${esc(l)}" class="${(it?.lists || []).includes(l) ? "on" : ""}">${esc(l)}</button>`).join("")}
+          <button data-newlist class="ghost">+ Nueva lista</button></div>
+      </section>
       ${d.overview ? `<section><p class="overview">${esc(d.overview)}</p></section>` : ""}
       ${type === "tv" ? `<section><h3>Temporadas</h3>${seasons.map((s) => seasonRow(s, it)).join("")}</section>` : ""}
     </div>`;
@@ -223,6 +273,22 @@ async function openDetail(type, id) {
   dlg.onclick = async (ev) => {
     const t = ev.target;
     if (t === dlg || t.closest("[data-close]")) return dlg.close();
+    const tl = t.closest("[data-togglelist]")?.dataset.togglelist;
+    const nl = t.closest("[data-newlist]");
+    if (tl || nl) {
+      const name = tl || (prompt("Nombre de la nueva lista") || "").trim();
+      if (!name) return;
+      if (nl && !(settings.lists || []).includes(name)) {
+        settings = { ...settings, lists: [...(settings.lists || []), name] };
+        store.saveSettings(settings).catch(() => {});
+      }
+      const cur = item() || { ...base, addedAt: Date.now(), watched: {}, status: "pending",
+        ...(seasons ? { seasons: seasons.map(({ n, count }) => ({ n, count })), total } : {}) };
+      const has = (cur.lists || []).includes(name);
+      await store.put({ ...cur, lists: has && tl ? cur.lists.filter((x) => x !== name) : [...new Set([...(cur.lists || []), name])] });
+      redrawKeepingOpen();
+      return;
+    }
     const st = t.closest("[data-status]")?.dataset.status;
     if (st) {
       if (st === "remove") await store.remove(key);
@@ -279,8 +345,12 @@ function openSettings() {
       <p class="sub">Elige tu archivo <b>tvtime.json</b>. Se procesa en tu navegador y no pisa lo que ya tengas aquí.</p>
       <label class="file"><input type="file" id="tvtimeFile" accept=".json,application/json"><span>Elegir archivo…</span></label>
       <div id="importOut"></div>
+      <p class="sub" style="margin-top:16px">¿Ya importaste tu historial? Con el mismo archivo puedes traer tus <b>listas</b> (Classics, Spanish movies…).</p>
+      <label class="file"><input type="file" id="tvtimeLists" accept=".json,application/json"><span>Importar mis listas…</span></label>
+      <div id="importListsOut"></div>
     </form>`;
   $("#tvtimeFile", dlg).onchange = (e) => runImport(e.target.files[0]);
+  $("#tvtimeLists", dlg).onchange = (e) => runImportLists(e.target.files[0]);
   const lo = $("#logout", dlg); if (lo) lo.onclick = () => fb.signOut().then(() => location.reload());
   const up = $("#uploadLocal", dlg);
   if (up) up.onclick = async () => {
@@ -301,6 +371,24 @@ function openSettings() {
     renderList();
   };
   dlg.showModal();
+}
+
+async function runImportLists(file) {
+  const out = $("#importListsOut");
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { out.innerHTML = `<p class="warn">El archivo no es válido.</p>`; return; }
+  if (data.source !== "tvtime") { out.innerHTML = `<p class="warn">Este no parece el archivo de TV Time.</p>`; return; }
+  out.innerHTML = `<p class="sub" id="impLTxt">Preparando…</p><div class="bar big"><i id="impLBar" style="width:0"></i></div>`;
+  const res = await importTvTimeLists(data, store, (n, total) => {
+    $("#impLBar").style.width = `${Math.round((n / total) * 100)}%`;
+    $("#impLTxt").textContent = `Buscando los títulos de tus listas: ${n} de ${total}`;
+  });
+  settings = { ...settings, lists: [...new Set([...(settings.lists || []), ...res.lists])] };
+  await store.saveSettings(settings).catch(() => {});
+  out.innerHTML = `<p class="sub">Importadas ${res.lists.length} listas con ${res.tagged} títulos (${res.added} eran nuevos y están en Pendiente).</p>
+    ${res.missing.length ? `<details><summary>No encontrados en TMDB (${res.missing.length})</summary><ul class="missing">${res.missing.map((m) => `<li>${esc(m)}</li>`).join("")}</ul></details>` : ""}`;
+  renderList();
 }
 
 async function runImport(file) {
@@ -329,6 +417,8 @@ document.addEventListener("click", (ev) => {
     const [type, id] = open.dataset.open.split(":");
     return openDetail(type, +id);
   }
+  const lc = ev.target.closest("[data-list]");
+  if (lc) { currentList = lc.dataset.list; renderList(); return; }
   const t = ev.target.closest("[data-tab]");
   if (t) { tab = t.dataset.tab; renderList(); }
   const f = ev.target.closest("[data-type]");

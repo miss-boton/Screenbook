@@ -84,3 +84,25 @@ export async function searchMovie(name, year) {
   const any = await get("/search/movie", { query: name });
   return any.results?.[0] || null;
 }
+
+// Ids de TMDB de las plataformas marcadas en Ajustes (para "Novedades").
+export async function myProviderIds(type) {
+  const data = await get(`/watch/providers/${type}`, { watch_region: REGION });
+  return (data.results || []).filter((p) => myLabel(p.provider_name)).map((p) => p.provider_id);
+}
+
+export async function discoverNew(type, providerIds, days) {
+  if (!providerIds.length) return [];
+  const today = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+  const dateKey = type === "movie" ? "primary_release_date" : "first_air_date";
+  const data = await get(`/discover/${type}`, {
+    watch_region: REGION,
+    with_watch_providers: providerIds.join("|"),
+    with_watch_monetization_types: "flatrate",
+    [`${dateKey}.gte`]: from,
+    [`${dateKey}.lte`]: today,
+    sort_by: "popularity.desc",
+  });
+  return (data.results || []).map((r) => brief(r, type));
+}

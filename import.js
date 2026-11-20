@@ -76,3 +76,33 @@ export async function importTvTime(data, store, onProgress) {
   result.added = unique;
   return result;
 }
+
+// Listas propias de TV Time: marca cada título con el nombre de la lista.
+export async function importTvTimeLists(data, store, onProgress) {
+  const lists = (data.lists || []).filter((l) => l.items?.length);
+  const entries = lists.flatMap((l) => l.items.map((it) => ({ list: l.name, it })));
+  const res = { lists: lists.map((l) => l.name), tagged: 0, added: 0, missing: [] };
+  const found = await pool(entries, 6, async ({ it }) => {
+    if (it.type === "tv") {
+      const hit = await tmdb.findByTvdb(it.tvdb_id);
+      if (!hit) return null;
+      return { key: `tv:${hit.id}`, brief: tmdb.brief(hit, "tv") };
+    }
+    const hit = await tmdb.searchMovie(it.name, it.year);
+    return hit ? { key: `movie:${hit.id}`, brief: tmdb.brief(hit, "movie") } : null;
+  }, (n) => onProgress(n, entries.length));
+  const all = store.all();
+  const changed = {};
+  entries.forEach(({ list, it }, k) => {
+    const f = found[k];
+    if (!f) { if (it.name) res.missing.push(`${it.name} (${list})`); return; }
+    const cur = changed[f.key] || all[f.key];
+    if (!cur) res.added++;
+    const base = cur || { ...f.brief, key: f.key, status: "pending", watched: {}, addedAt: Date.now(), from: "tvtime" };
+    changed[f.key] = { ...base, lists: [...new Set([...(base.lists || []), list])] };
+  });
+  const list = Object.values(changed);
+  res.tagged = list.length;
+  await store.putMany(list);
+  return res;
+}
