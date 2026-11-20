@@ -31,13 +31,14 @@
       <button data-tab="seen">Visto <span class="count"></span></button>
       <button data-tab="paused">En pausa <span class="count"></span></button>
       <button data-tab="news">Novedades</button>
-      <button data-tab="lists">Listas</button>
+      <button data-tab="lists">Listas <span class="count"></span></button>
       <button data-tab="discover">Descubrir</button>
     </nav>
     <div class="filters">
       <button data-type="all" class="on">Todo</button>
       <button data-type="tv">Series</button>
       <button data-type="movie">Películas</button>
+      <select id="platformFilter" aria-label="Filtrar por plataforma"></select>
     </div>
   </header>
   <p id="notice" class="notice" hidden>Falta configurar la clave de TMDB: la búsqueda no funcionará todavía.</p>

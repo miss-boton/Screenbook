@@ -106,3 +106,10 @@ export async function discoverNew(type, providerIds, days) {
   });
   return (data.results || []).map((r) => brief(r, type));
 }
+
+// Todas las plataformas conocidas (de la lista de España) en las que está un título.
+export function platformLabels(detail) {
+  const es = detail?.["watch/providers"]?.results?.[REGION];
+  const names = (es?.flatrate || []).map((p) => p.provider_name.toLowerCase());
+  return ALL_PLATFORMS.filter((p) => names.some((n) => p.match.some((m) => (m === "max" ? n === "max" : n.includes(m))))).map((p) => p.label);
+}

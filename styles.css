@@ -158,3 +158,9 @@ h1 { color: #D9A21B; }
 .listchips .count { color: var(--sun); }
 .listbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: -6px 0 18px; font-size: 14px; }
 .link.danger { color: var(--text); text-decoration-color: var(--coral); }
+
+#platformFilter { margin-left: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 13px; }
+@media (max-width: 600px) {
+  .filters { flex-wrap: wrap; overflow: visible; }
+  #platformFilter { margin-left: 0; flex: 1 1 100%; padding: 6px 12px; }
+}

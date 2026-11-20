@@ -19,6 +19,7 @@ const STATUSES = [
 ];
 let tab = "watching";
 let typeFilter = "all";
+let platformFilter = "all"; // "all", una plataforma, o "none" (en ninguna de las mías)
 
 // ---------- Listas ----------
 function progressOf(item) {
@@ -54,11 +55,14 @@ function card(item, note = "") {
 }
 
 function renderList() {
-  const items = Object.values(store.all())
+  const inTab = Object.values(store.all())
     .filter((i) => i.status === tab && (typeFilter === "all" || i.type === typeFilter))
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const items = inTab.filter(platformMatch);
   const counts = Object.fromEntries(STATUSES.map((s) => [s.id, 0]));
   Object.values(store.all()).forEach((i) => counts[i.status] != null && counts[i.status]++);
+  counts.lists = listIds().length;
+  renderPlatformSelect();
   document.querySelectorAll("[data-tab]").forEach((b) => {
     const id = b.dataset.tab;
     b.classList.toggle("on", id === tab);
@@ -69,9 +73,56 @@ function renderList() {
   if (tab === "discover") return renderDiscover(main);
   if (tab === "news") return renderNews(main);
   if (tab === "lists") return renderLists(main);
+  if (platformFilter !== "all" && ensurePlatforms(inTab, main)) return;
   main.innerHTML = items.length
     ? `<div class="grid">${items.map(card).join("")}</div>`
-    : `<div class="empty"><p>Aún no hay nada en <b>${STATUSES.find((s) => s.id === tab).label}</b>.</p><p>Busca una serie o película arriba para añadirla.</p></div>`;
+    : platformFilter !== "all"
+      ? `<div class="empty"><p>Nada en <b>${STATUSES.find((s) => s.id === tab).label}</b> ${platformFilter === "none" ? "fuera de tus plataformas" : `en ${esc(platformFilter)}`}.</p></div>`
+      : `<div class="empty"><p>Aún no hay nada en <b>${STATUSES.find((s) => s.id === tab).label}</b>.</p><p>Busca una serie o película arriba para añadirla.</p></div>`;
+}
+
+// ---------- Filtro por plataforma ----------
+// Cada título guarda en "prov" las plataformas (de la lista de España) donde está, y cuándo se comprobó.
+const PROV_TTL = 7 * 864e5;
+function platformMatch(i) {
+  if (platformFilter === "all") return true;
+  const mine = (i.prov || []).filter((p) => settings.platforms.includes(p));
+  return platformFilter === "none" ? i.provAt && !mine.length : mine.includes(platformFilter);
+}
+function renderPlatformSelect() {
+  const sel = $("#platformFilter");
+  if (!sel) return;
+  sel.hidden = ["news", "lists", "discover"].includes(tab);
+  const opts = [["all", "Todas las plataformas"], ...settings.platforms.map((p) => [p, p]), ["none", "En ninguna de las mías"]];
+  if (!opts.some(([v]) => v === platformFilter)) platformFilter = "all";
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}" ${v === platformFilter ? "selected" : ""}>${esc(l)}</option>`).join("");
+}
+let provJob = null;
+function ensurePlatforms(list, main) {
+  const stale = list.filter((i) => !i.provAt || Date.now() - i.provAt > PROV_TTL);
+  if (!stale.length) return false;
+  if (provJob) return true;
+  main.innerHTML = `<p class="hint" id="provTxt">Comprobando en qué plataformas está cada título: 0 de ${stale.length}…</p><div class="bar big"><i id="provBar" style="width:0"></i></div>`;
+  provJob = (async () => {
+    let done = 0, i = 0;
+    const out = [];
+    async function worker() {
+      while (i < stale.length) {
+        const it = stale[i++];
+        try {
+          const d = await tmdb.details(it.type, it.id);
+          out.push({ ...store.get(it.key), prov: tmdb.platformLabels(d), provAt: Date.now() });
+        } catch {}
+        done++;
+        const t = $("#provTxt"), b = $("#provBar");
+        if (t) t.textContent = `Comprobando en qué plataformas está cada título: ${done} de ${stale.length}…`;
+        if (b) b.style.width = `${Math.round((done / stale.length) * 100)}%`;
+      }
+    }
+    await Promise.all(Array.from({ length: 6 }, worker));
+    await store.putMany(out.filter((x) => x.key));
+  })().finally(() => { provJob = null; renderList(); });
+  return true;
 }
 
 // ---------- Novedades ----------
@@ -248,6 +299,7 @@ async function openDetail(type, id) {
 
   const provs = tmdb.providers(d);
   const mine = provs.filter((p) => p.mine);
+  if (item()) store.put({ ...item(), prov: tmdb.platformLabels(d), provAt: Date.now() });
   const lastAired = d.last_episode_to_air;
   const nextAir = d.next_episode_to_air;
 
@@ -511,6 +563,7 @@ document.addEventListener("click", (ev) => {
   if (!ev.target.closest(".search")) $("#results").hidden = true;
 });
 $("#q").addEventListener("input", (e) => onSearch(e.target.value));
+$("#platformFilter").addEventListener("change", (e) => { platformFilter = e.target.value; renderList(); });
 $("#q").addEventListener("focus", (e) => onSearch(e.target.value));
 $("#detail").addEventListener("close", renderList);
 $("#detail").addEventListener("toggle", (ev) => {
