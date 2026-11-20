@@ -1,0 +1,22 @@
+rules_version = '2';
+// Quién puede usar Screenbook: los emails de la lista "config/allowlist" (campo "emails").
+// Cada persona solo ve y cambia sus propias listas y ajustes.
+service cloud.firestore {
+  match /databases/{db}/documents {
+    function allowed() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in get(/databases/$(db)/documents/config/allowlist).data.emails;
+    }
+    // La lista de autorizados solo se cambia desde la consola de Firebase.
+    match /config/allowlist {
+      allow read, write: if false;
+    }
+    match /users/{uid} {
+      allow read, write: if allowed() && request.auth.uid == uid;
+      match /items/{item} {
+        allow read, write: if allowed() && request.auth.uid == uid;
+      }
+    }
+  }
+}
