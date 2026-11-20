@@ -42,6 +42,8 @@ export function createStore() {
       for (const it of list) items[it.key] = { ...it, updatedAt: it.updatedAt || now };
       writeLocal(items); emit();
     },
+    getSettings: () => loadSettings(),
+    async saveSettings(st) { saveSettings(st); },
     async replaceAll(next) { items = next; writeLocal(items); emit(); },
   };
 }

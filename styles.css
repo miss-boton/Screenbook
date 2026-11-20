@@ -121,3 +121,10 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .tabs { scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
 }
+
+body.locked .search, body.locked .tabs, body.locked .filters, body.locked .actions { display: none; }
+.login { max-width: 420px; margin: 60px auto; text-align: center; display: flex; flex-direction: column; gap: 14px; align-items: center; }
+.login h2 { font-size: 26px; }
+.primary { padding: 12px 22px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.link { color: var(--mint); text-decoration: underline; padding: 0; font-size: inherit; }
+.account { margin-bottom: 14px; }

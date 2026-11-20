@@ -1,11 +1,12 @@
 import * as tmdb from "./tmdb.js";
-import { createStore, exportBackup, loadSettings, saveSettings } from "./store.js";
-import { ALL_PLATFORMS, DEFAULT_PLATFORMS } from "./config.js";
+import { createStore, exportBackup } from "./store.js";
+import { ALL_PLATFORMS, DEFAULT_PLATFORMS, FIREBASE } from "./config.js";
+import { initFirebase } from "./firebase-store.js";
 import { importTvTime } from "./import.js";
 
-const store = createStore();
-let settings = { platforms: DEFAULT_PLATFORMS, ...loadSettings() };
-tmdb.setMyPlatforms(settings.platforms);
+let store = null;
+let settings = { platforms: DEFAULT_PLATFORMS };
+let fb = null;
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -265,6 +266,8 @@ function openSettings() {
   dlg.innerHTML = `
     <form method="dialog" class="sheet pad">
       <button class="close" value="cancel" aria-label="Cerrar">×</button>
+      ${store.mode === "firebase" ? `<p class="sub account">Conectada como <b>${esc(store.user.email)}</b> · <button type="button" class="link" id="logout">Cerrar sesión</button></p>
+        ${localCount() ? `<p class="sub">Este navegador tiene ${localCount()} títulos guardados de antes. <button type="button" class="link" id="uploadLocal">Pasarlos a mi cuenta</button></p>` : ""}` : ""}
       <h2>Mis plataformas</h2>
       <p class="sub">Marca a las que estás suscrita. Se resaltarán en cada ficha y se usarán para tus avisos.</p>
       <div class="plats">
@@ -278,11 +281,22 @@ function openSettings() {
       <div id="importOut"></div>
     </form>`;
   $("#tvtimeFile", dlg).onchange = (e) => runImport(e.target.files[0]);
+  const lo = $("#logout", dlg); if (lo) lo.onclick = () => fb.signOut().then(() => location.reload());
+  const up = $("#uploadLocal", dlg);
+  if (up) up.onclick = async () => {
+    const local = createStore();
+    const mine = store.all();
+    const list = Object.values(local.all()).filter((x) => !mine[x.key]);
+    up.disabled = true; up.textContent = "Subiendo…";
+    await store.putMany(list);
+    await local.replaceAll({});
+    up.parentElement.textContent = `Hecho: ${list.length} títulos pasados a tu cuenta.`;
+  };
   dlg.onclose = () => {
     if (dlg.returnValue !== "save") return;
     const chosen = [...dlg.querySelectorAll('input[name="p"]:checked')].map((i) => i.value);
     settings = { ...settings, platforms: chosen };
-    saveSettings(settings);
+    store.saveSettings(settings).catch((e) => alertBox(`No se pudieron guardar los ajustes: ${e.message}`));
     tmdb.setMyPlatforms(chosen);
     renderList();
   };
@@ -309,6 +323,7 @@ async function runImport(file) {
 
 // ---------- Arranque ----------
 document.addEventListener("click", (ev) => {
+  if (!store) return;
   const open = ev.target.closest("[data-open]");
   if (open && !ev.target.closest("#detail")) {
     const [type, id] = open.dataset.open.split(":");
@@ -333,6 +348,50 @@ $("#detail").addEventListener("toggle", (ev) => {
   const el = ev.target;
   if (el.tagName === "DETAILS" && el.open && currentLoadEpisodes) currentLoadEpisodes(+el.dataset.season);
 }, true);
-store.subscribe(() => { if (!$("#detail").open) renderList(); });
+function alertBox(msg) { $("#main").insertAdjacentHTML("afterbegin", `<p class="notice">${esc(msg)}</p>`); }
+function localCount() { try { return Object.keys(createStore().all()).length; } catch { return 0; } }
+
+function startWith(s) {
+  store = s;
+  settings = { platforms: DEFAULT_PLATFORMS, ...(store.getSettings() || {}) };
+  tmdb.setMyPlatforms(settings.platforms);
+  document.body.classList.remove("locked");
+  store.subscribe(() => { if (!$("#detail").open) renderList(); });
+}
+
+function showLogin(message = "") {
+  document.body.classList.add("locked");
+  $("#main").innerHTML = `
+    <div class="login">
+      <h2>Tu diario de series y películas</h2>
+      <p class="sub">Entra con tu cuenta de Google para ver tus listas en cualquier dispositivo.</p>
+      ${message ? `<p class="warn">${esc(message)}</p>` : ""}
+      <button id="signin" class="primary">Entrar con Google</button>
+    </div>`;
+  $("#signin").onclick = () => fb.signIn().catch((e) => showLogin(`No se pudo entrar: ${e.message}`));
+}
+
+async function boot() {
+  if (!FIREBASE) return startWith(createStore());
+  $("#main").innerHTML = `<p class="hint">Cargando…</p>`;
+  try { fb = await initFirebase(FIREBASE); }
+  catch (e) { $("#main").innerHTML = `<div class="empty"><p>No se pudo cargar Firebase (${esc(e.message)}).</p></div>`; return; }
+  await fb.getRedirectResult();
+  let started = false;
+  let loginMsg = "";
+  fb.onUser(async (user) => {
+    if (!user) return showLogin(loginMsg);
+    if (started) return;
+    try { startWith(await fb.openStore(user)); started = true; }
+    catch (e) {
+      const denied = e.code === "permission-denied";
+      loginMsg = denied ? `La cuenta ${user.email} no tiene acceso. Pide a quien gestiona Screenbook que te añada.` : `Error: ${e.message}`;
+      showLogin(loginMsg);
+      await fb.signOut();
+      return;
+    }
+  });
+}
+boot();
 
 if (!tmdb.hasKey()) $("#notice").hidden = false;
