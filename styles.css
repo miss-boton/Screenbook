@@ -113,3 +113,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .file:focus-within span { outline: 2px solid var(--sun); outline-offset: 2px; }
 .bar.big { height: 8px; margin-top: 8px; }
 .missing { color: var(--muted); font-size: 13px; max-height: 200px; overflow: auto; }
+@media (max-width: 600px) {
+  h1 { font-size: 22px; }
+  .top { gap: 8px; }
+  .actions .small { padding: 5px 10px; font-size: 12px; white-space: nowrap; }
+  .tabs button { padding: 6px 11px; font-size: 14px; }
+  .tabs { scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+}
