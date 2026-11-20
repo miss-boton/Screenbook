@@ -10,7 +10,7 @@ export async function initFirebase(config) {
   ]);
   const app = initializeApp(config);
   const a = auth.getAuth(app);
-  const db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache() });
+  const db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache(), ignoreUndefinedProperties: true });
   const provider = new auth.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: "select_account" });
 
