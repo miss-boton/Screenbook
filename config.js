@@ -25,9 +25,15 @@ export const ALL_PLATFORMS = [
 // Plataformas marcadas por defecto para una persona nueva.
 export const DEFAULT_PLATFORMS = ["Movistar+", "Netflix", "Prime Video", "HBO Max", "Apple TV+", "SkyShowtime", "Atresplayer", "Disney+"];
 
-// Firebase: se rellena en el siguiente paso. Mientras esté vacío,
-// las listas se guardan solo en este navegador. Con Firebase, cada persona
+// Firebase (no es secreto: identifica el proyecto). Con Firebase, cada persona
 // entra con su cuenta de Google y tiene sus propias listas y plataformas.
 // Quién puede entrar se controla con una lista de emails autorizados en las
 // reglas de Firestore (firestore.rules), no aquí: este archivo es público.
-export const FIREBASE = null;
+export const FIREBASE = {
+  apiKey: "AIzaSyAoEowv7eACGUm1j1qaDSXJ9FSMai_Qvyg",
+  authDomain: "screenbook-54684.firebaseapp.com",
+  projectId: "screenbook-54684",
+  storageBucket: "screenbook-54684.firebasestorage.app",
+  messagingSenderId: "1059530013888",
+  appId: "1:1059530013888:web:abae072d8e102e9c974125",
+};
