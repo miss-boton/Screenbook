@@ -24,6 +24,23 @@ export async function initFirebase(config) {
       }
     },
     signOut: () => auth.signOut(a),
+    // Entrar con un enlace enviado por email (sirve para Outlook, Hotmail, Gmail…).
+    async sendEmailLink(email) {
+      const url = location.origin + location.pathname;
+      await auth.sendSignInLinkToEmail(a, email, { url, handleCodeInApp: true });
+      try { localStorage.setItem("screenbook.emailForSignIn", email); } catch {}
+    },
+    async completeEmailLink(askEmail) {
+      if (!auth.isSignInWithEmailLink(a, location.href)) return false;
+      let email = null;
+      try { email = localStorage.getItem("screenbook.emailForSignIn"); } catch {}
+      if (!email) email = askEmail();
+      if (!email) return false;
+      await auth.signInWithEmailLink(a, email, location.href);
+      try { localStorage.removeItem("screenbook.emailForSignIn"); } catch {}
+      history.replaceState(null, "", location.pathname);
+      return true;
+    },
     getRedirectResult: () => auth.getRedirectResult(a).catch(() => null),
     async openStore(user) {
       const userDoc = fs.doc(db, "users", user.uid);

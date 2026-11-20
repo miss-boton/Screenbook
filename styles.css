@@ -132,3 +132,8 @@ body.locked .search, body.locked .tabs, body.locked .filters, body.locked .actio
 h1 { display: flex; align-items: center; gap: 10px; }
 .logo { width: 34px; height: 34px; border-radius: 8px; }
 @media (max-width: 600px) { .logo { width: 28px; height: 28px; } }
+
+.or { margin-top: 10px; }
+.emailform { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; justify-content: center; }
+.emailform input { flex: 1 1 200px; padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
+.emailform button { padding: 10px 16px; }

@@ -364,21 +364,39 @@ function showLogin(message = "") {
   $("#main").innerHTML = `
     <div class="login">
       <h2>Tu diario de series y películas</h2>
-      <p class="sub">Entra con tu cuenta de Google para ver tus listas en cualquier dispositivo.</p>
+      <p class="sub">Entra para ver tus listas en cualquier dispositivo.</p>
       ${message ? `<p class="warn">${esc(message)}</p>` : ""}
       <button id="signin" class="primary">Entrar con Google</button>
+      <p class="sub or">o con cualquier email (Outlook, Hotmail…)</p>
+      <form id="emailForm" class="emailform">
+        <input id="email" type="email" required placeholder="tu@email.com" autocomplete="email">
+        <button class="ghost">Enviarme un enlace</button>
+      </form>
+      <p class="sub" id="emailMsg"></p>
     </div>`;
   $("#signin").onclick = () => fb.signIn().catch((e) => showLogin(`No se pudo entrar: ${e.message}`));
+  $("#emailForm").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const email = $("#email").value.trim().toLowerCase();
+    $("#emailMsg").textContent = "Enviando…";
+    try {
+      await fb.sendEmailLink(email);
+      $("#emailMsg").innerHTML = `Te he enviado un enlace a <b>${esc(email)}</b>. Ábrelo en este mismo dispositivo para entrar. Si no lo ves, mira en correo no deseado.`;
+    } catch (e) { $("#emailMsg").textContent = `No se pudo enviar el enlace: ${e.message}`; }
+  };
 }
 
+let loginErr = "";
 async function boot() {
   if (!FIREBASE) return startWith(createStore());
   $("#main").innerHTML = `<p class="hint">Cargando…</p>`;
   try { fb = await initFirebase(FIREBASE); }
   catch (e) { $("#main").innerHTML = `<div class="empty"><p>No se pudo cargar Firebase (${esc(e.message)}).</p></div>`; return; }
   await fb.getRedirectResult();
+  try { await fb.completeEmailLink(() => prompt("Confirma tu email para entrar")); }
+  catch (e) { loginErr = `No se pudo entrar con el enlace: ${e.message}`; }
   let started = false;
-  let loginMsg = "";
+  let loginMsg = loginErr;
   fb.onUser(async (user) => {
     if (!user) return showLogin(loginMsg);
     if (started) return;
