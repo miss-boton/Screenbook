@@ -47,7 +47,9 @@ export async function buildNews(items) {
   try {
     const [mIds, tIds] = await Promise.all([tmdb.myProviderIds("movie"), tmdb.myProviderIds("tv")]);
     const [m, t] = await Promise.all([tmdb.discoverNew("movie", mIds, 90), tmdb.discoverNew("tv", tIds, 60)]);
-    const withPlatform = async (list, type) => (await pool(list.slice(0, 18), 6, async (r) => {
+    // Fuera lo que ya has visto (o series vistas al 100%).
+    const seenAll = (r) => { const k = known(r); return k && (k.status === "seen" || (k.type === "tv" && k.total && Object.keys(k.watched || {}).length >= k.total)); };
+    const withPlatform = async (list, type) => (await pool(list.filter((r) => !seenAll(r)).slice(0, 18), 6, async (r) => {
       const p = tmdb.providers(await tmdb.details(type, r.id)).filter((x) => x.mine).map((x) => x.mine);
       return p.length ? { item: { ...r, ...(known(r) || {}) }, note: [...new Set(p)].join(" · ") } : null;
     })).filter(Boolean);

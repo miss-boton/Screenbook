@@ -13,11 +13,11 @@ const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<
 
 const STATUSES = [
   { id: "watching", label: "Viendo" },
+  { id: "paused", label: "En pausa" },
   { id: "pending", label: "Pendiente" },
   { id: "seen", label: "Visto" },
-  { id: "paused", label: "En pausa" },
 ];
-let tab = "watching";
+let tab = "news";
 let typeFilter = "all";
 let platformFilter = "all"; // "all", una plataforma, o "none" (en ninguna de las mías)
 
@@ -57,7 +57,7 @@ function card(item, note = "") {
 function renderList() {
   const inTab = Object.values(store.all())
     .filter((i) => i.status === tab && (typeFilter === "all" || i.type === typeFilter))
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    .sort((a, b) => sortDate(b).localeCompare(sortDate(a)));
   const items = inTab.filter(platformMatch);
   const counts = Object.fromEntries(STATUSES.map((s) => [s.id, 0]));
   Object.values(store.all()).forEach((i) => counts[i.status] != null && counts[i.status]++);
@@ -73,13 +73,17 @@ function renderList() {
   if (tab === "discover") return renderDiscover(main);
   if (tab === "news") return renderNews(main);
   if (tab === "lists") return renderLists(main);
-  if (platformFilter !== "all" && ensurePlatforms(inTab, main)) return;
+  if (ensureDetails(inTab, main, platformFilter !== "all")) return;
   main.innerHTML = items.length
-    ? `<div class="grid">${items.map(card).join("")}</div>`
+    ? `${provJob ? `<p class="hint" id="provTxt">Actualizando fechas y plataformas…</p>` : ""}<div class="grid">${items.map((i) => card(i)).join("")}</div>`
     : platformFilter !== "all"
       ? `<div class="empty"><p>Nada en <b>${STATUSES.find((s) => s.id === tab).label}</b> ${platformFilter === "none" ? "fuera de tus plataformas" : `en ${esc(platformFilter)}`}.</p></div>`
       : `<div class="empty"><p>Aún no hay nada en <b>${STATUSES.find((s) => s.id === tab).label}</b>.</p><p>Busca una serie o película arriba para añadirla.</p></div>`;
 }
+
+// Orden: películas por fecha de estreno y series por fecha del último episodio, de más reciente a más antiguo.
+const sortDate = (i) => i.date || (i.year ? `${i.year}-01-01` : "");
+const detailDate = (d) => d.last_episode_to_air?.air_date || d.last_air_date || d.release_date || d.first_air_date || "";
 
 // ---------- Filtro por plataforma ----------
 // Cada título guarda en "prov" las plataformas (de la lista de España) donde está, y cuándo se comprobó.
@@ -98,11 +102,12 @@ function renderPlatformSelect() {
   sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}" ${v === platformFilter ? "selected" : ""}>${esc(l)}</option>`).join("");
 }
 let provJob = null;
-function ensurePlatforms(list, main) {
-  const stale = list.filter((i) => !i.provAt || Date.now() - i.provAt > PROV_TTL);
+// Completa plataformas y fecha de cada título (una vez por semana). Si "blocking", espera antes de mostrar la lista.
+function ensureDetails(list, main, blocking) {
+  const stale = list.filter((i) => !i.provAt || i.date === undefined || Date.now() - i.provAt > PROV_TTL);
   if (!stale.length) return false;
-  if (provJob) return true;
-  main.innerHTML = `<p class="hint" id="provTxt">Comprobando en qué plataformas está cada título: 0 de ${stale.length}…</p><div class="bar big"><i id="provBar" style="width:0"></i></div>`;
+  if (provJob) return blocking;
+  if (blocking) main.innerHTML = `<p class="hint" id="provTxt">Comprobando en qué plataformas está cada título: 0 de ${stale.length}…</p><div class="bar big"><i id="provBar" style="width:0"></i></div>`;
   provJob = (async () => {
     let done = 0, i = 0;
     const out = [];
@@ -111,18 +116,19 @@ function ensurePlatforms(list, main) {
         const it = stale[i++];
         try {
           const d = await tmdb.details(it.type, it.id);
-          out.push({ ...store.get(it.key), prov: tmdb.platformLabels(d), provAt: Date.now() });
+          out.push({ ...store.get(it.key), prov: tmdb.platformLabels(d), provAt: Date.now(), date: detailDate(d) });
+          if (out.length >= 100) await store.putMany(out.splice(0).filter((x) => x.key));
         } catch {}
         done++;
         const t = $("#provTxt"), b = $("#provBar");
-        if (t) t.textContent = `Comprobando en qué plataformas está cada título: ${done} de ${stale.length}…`;
+        if (t) t.textContent = `${blocking ? "Comprobando en qué plataformas está cada título" : "Actualizando fechas y plataformas"}: ${done} de ${stale.length}…`;
         if (b) b.style.width = `${Math.round((done / stale.length) * 100)}%`;
       }
     }
     await Promise.all(Array.from({ length: 6 }, worker));
     await store.putMany(out.filter((x) => x.key));
   })().finally(() => { provJob = null; renderList(); });
-  return true;
+  return blocking;
 }
 
 // ---------- Novedades ----------
@@ -170,7 +176,7 @@ const inList = (lid, key) => lid.startsWith("p:") ? (store.get(key)?.lists || []
 
 function renderLists(main) {
   const ids = listIds();
-  if (!ids.length) { main.innerHTML = `<div class="empty"><p>Aún no tienes listas.</p><p>Abre la ficha de un título y pulsa "+ Nueva lista", o importa tus listas de TV Time en Ajustes.</p></div>`; return; }
+  if (!ids.length) { main.innerHTML = `<div class="empty"><p>Aún no tienes listas.</p><p><button class="primary" data-listact="new">+ Nueva lista</button></p><p>También puedes importar tus listas de TV Time en Ajustes.</p></div>`; return; }
   if (!ids.includes(currentList)) currentList = ids[0];
   const items = listItems(currentList).filter((i) => typeFilter === "all" || i.type === typeFilter);
   const sh = currentList.startsWith("s:") ? sharedById(currentList.slice(2)) : null;
@@ -178,6 +184,7 @@ function renderLists(main) {
   main.innerHTML = `<div class="listchips">${ids.map((l) => `<button data-list="${esc(l)}" class="${l === currentList ? "on" : ""}">${esc(listLabel(l))} <span class="count">${listItems(l).length}</span></button>`).join("")}</div>
     <div class="listbar">
       ${sh ? `<span class="sub">Compartida con ${esc(sh.members.filter((m) => m !== me).join(", ") || "nadie más")}</span>` : ""}
+      <button class="link" data-listact="new">+ Nueva lista</button>
       <button class="link" data-listact="rename">Renombrar</button>
       ${store.mode === "firebase" ? `<button class="link" data-listact="share">${sh ? "Añadir persona" : "Compartir"}</button>` : ""}
       <button class="link danger" data-listact="delete">${sh && sh.owner !== me ? "Salir de la lista" : "Eliminar lista"}</button>
@@ -186,6 +193,21 @@ function renderLists(main) {
 }
 
 async function listAction(act) {
+  if (act === "new") {
+    const name = (prompt("Nombre de la nueva lista") || "").trim();
+    if (!name) return;
+    const share = store.mode === "firebase" && confirm(`¿Quieres compartir "${name}" con alguien para que también pueda añadir títulos?`);
+    if (share) {
+      const emails = askEmails("Email de la persona (si son varias, sepáralos con comas). Tiene que estar en tu lista de personas autorizadas.");
+      if (emails.length) {
+        const id = await store.createShared({ name, members: [store.user.email, ...emails], items: {} });
+        currentList = `s:${id}`; renderList(); return;
+      }
+    }
+    settings = { ...settings, lists: [...new Set([...(settings.lists || []), name])] };
+    await store.saveSettings(settings);
+    currentList = `p:${name}`; renderList(); return;
+  }
   const lid = currentList;
   if (!lid) return;
   if (lid.startsWith("p:")) {
@@ -243,10 +265,16 @@ async function renderDiscover(main) {
     main.innerHTML = `<div class="empty"><p>Falta la clave de TMDB para ver tendencias.</p></div>`;
     return;
   }
-  main.innerHTML = `<p class="hint">Lo más visto esta semana</p><div class="grid" id="trend"></div>`;
+  main.innerHTML = `<p class="hint">Lo más visto esta semana que aún no tienes en Screenbook</p><div class="grid" id="trend"></div>`;
   try {
-    const list = await tmdb.trending();
-    $("#trend").innerHTML = list.map((r) => card({ ...r, ...(store.get(`${r.type}:${r.id}`) || {}) })).join("");
+    const pages = await Promise.all([1, 2, 3, 4].map((p) => tmdb.trending(p)));
+    const seenKeys = new Set();
+    const list = pages.flat().filter((r) => {
+      const k = `${r.type}:${r.id}`;
+      if (seenKeys.has(k) || store.get(k)) return false;
+      seenKeys.add(k); return true;
+    }).filter((r) => typeFilter === "all" || r.type === typeFilter).slice(0, 40);
+    $("#trend").innerHTML = list.length ? list.map((r) => card(r)).join("") : `<p class="hint">Ya tienes todo lo más visto de la semana.</p>`;
   } catch (e) {
     main.innerHTML = `<div class="empty"><p>No se pudo cargar TMDB (${esc(e.message)}).</p></div>`;
   }
@@ -299,7 +327,7 @@ async function openDetail(type, id) {
 
   const provs = tmdb.providers(d);
   const mine = provs.filter((p) => p.mine);
-  if (item()) store.put({ ...item(), prov: tmdb.platformLabels(d), provAt: Date.now() });
+  if (item()) store.put({ ...item(), prov: tmdb.platformLabels(d), provAt: Date.now(), date: detailDate(d) });
   const lastAired = d.last_episode_to_air;
   const nextAir = d.next_episode_to_air;
 
@@ -578,7 +606,7 @@ function startWith(s) {
   settings = { platforms: DEFAULT_PLATFORMS, ...(store.getSettings() || {}) };
   tmdb.setMyPlatforms(settings.platforms);
   document.body.classList.remove("locked");
-  store.subscribe(() => { if (!$("#detail").open) renderList(); });
+  store.subscribe(() => { newsCache = null; if (!$("#detail").open) renderList(); });
 }
 
 function showLogin(message = "") {

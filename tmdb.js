@@ -67,8 +67,8 @@ export function myLabel(name) {
   return hit ? hit.label : null;
 }
 
-export async function trending() {
-  const data = await get("/trending/all/week");
+export async function trending(page = 1) {
+  const data = await get("/trending/all/week", { page });
   return data.results.filter((r) => r.media_type === "tv" || r.media_type === "movie").map((r) => brief(r));
 }
 
